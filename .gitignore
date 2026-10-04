@@ -1,0 +1,7 @@
+# отходы мутационной проверки и сборки
+tests/mut*.js
+tests/mut_*.js
+__pycache__/
+*.pyc
+module.zip
+module.release.json

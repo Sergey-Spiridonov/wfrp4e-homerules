@@ -1,0 +1,489 @@
+.chat-message a.homerule-deflect {
+    display: inline-block;
+    margin-top: 0.15rem;
+    font-size: var(--font-size-12, 12px);
+}
+
+.chat-message a.homerule-deflect i {
+    margin-right: 0.25rem;
+}
+
+.chat-message a.homerule-deflect.nulled {
+    text-decoration: line-through;
+    opacity: 0.6;
+    pointer-events: none;
+}
+
+/* Заклинания по школам: заголовок группы в тон заголовку списка системы, но тоньше.
+   Цвета — из темы. */
+.sheet-list .list-content > .homerule-lore-header {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.15rem 0.4rem;
+    border-top: 1px solid var(--color-faded);
+    box-shadow: 0 0 6px #6b3a0f60 inset;
+    color: var(--color-grey2);
+    font-size: var(--font-size-13, 13px);
+    font-weight: bold;
+    cursor: pointer;
+    user-select: none;
+}
+
+.homerule-lore-header .homerule-lore-chevron {
+    flex: 0 0 0.8rem;
+    font-size: 0.7rem;
+    text-align: center;
+    transition: transform 0.15s;
+}
+
+.homerule-lore-header.collapsed .homerule-lore-chevron {
+    transform: rotate(-90deg);
+}
+
+/* Фон кружку даёт системное правило `.lore.chosen.<школа>`: оно сильнее этого. */
+.homerule-lore-header .homerule-lore-swatch {
+    flex: 0 0 0.7rem;
+    height: 0.7rem;
+    border: 1px solid var(--color-faded);
+    border-radius: 50%;
+    background-color: transparent;
+}
+
+.homerule-lore-header .homerule-lore-name {
+    flex: 1;
+}
+
+.homerule-lore-header .homerule-lore-count {
+    flex: 0 0 auto;
+    font-weight: normal;
+    opacity: 0.8;
+}
+
+.sheet-list .list-content > .list-row.homerule-lore-collapsed {
+    display: none !important;
+}
+
+/* Свои папки: значок вместо кружка школы, кнопки управления при наведении. */
+.homerule-lore-header .homerule-folder-icon {
+    flex: 0 0 0.9rem;
+    font-size: 0.8rem;
+    text-align: center;
+}
+
+.homerule-lore-header .homerule-folder-controls {
+    display: flex;
+    flex: 0 0 auto;
+    gap: 0.35rem;
+    font-weight: normal;
+    opacity: 0;
+    transition: opacity 0.15s;
+}
+
+.homerule-lore-header:hover .homerule-folder-controls,
+.homerule-lore-header:focus-within .homerule-folder-controls {
+    opacity: 1;
+}
+
+.homerule-folder-controls .homerule-folder-control {
+    font-size: 0.75rem;
+}
+
+.homerule-folder-controls .homerule-folder-control.disabled {
+    opacity: 0.3;
+    cursor: default;
+}
+
+/* Сюда можно бросить заклинание. */
+.sheet-list .list-content > .homerule-lore-header.drop-target {
+    outline: 1px dashed var(--color-grey2);
+    outline-offset: -2px;
+}
+
+.sheet-list .list-header .homerule-folder-add {
+    margin-left: 0.3rem;
+}
+
+/* Диалог «Выбрать заклинания». */
+.homerule-folder-pick {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    max-height: 60vh;
+    overflow-y: auto;
+}
+
+.homerule-folder-pick .homerule-folder-pick-row {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+}
+
+.homerule-folder-pick .homerule-folder-pick-note {
+    margin-left: auto;
+    font-size: var(--font-size-12, 12px);
+    opacity: 0.7;
+}
+
+/* Графа «ПС» в заголовке списка переключает порядок по порогу сотворения.
+   Графа узкая (25px у библиотеки), поэтому направление — маленьким треугольником. */
+.sheet-list .list-header .homerule-cn-sort {
+    cursor: pointer;
+    white-space: nowrap;
+    overflow: visible;
+    user-select: none;
+}
+
+.sheet-list .list-header .homerule-cn-sort:hover {
+    text-decoration: underline;
+}
+
+.sheet-list .list-header .homerule-cn-sort.asc::after,
+.sheet-list .list-header .homerule-cn-sort.desc::after {
+    margin-left: 1px;
+    font-size: 0.65em;
+}
+
+.sheet-list .list-header .homerule-cn-sort.asc::after {
+    content: "▲";
+}
+
+.sheet-list .list-header .homerule-cn-sort.desc::after {
+    content: "▼";
+}
+
+/* Строка поиска над списками: магия, навыки, таланты. */
+.homerule-search {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin: 0.25rem 0 0.4rem;
+    padding: 0 0.3rem;
+    color: var(--color-grey2);
+}
+
+/* Поле стоит вне системных списков, и ядро Foundry красило его своим фоном
+   `--input-background-color` — при тёмной схеме интерфейса это почти чёрная
+   полоса поверх пергамента. Делаем как система у своих полей в списках: тот же
+   пергамент, чуть затемнённый, и рамка цветом рамок форм системы, чтобы поле
+   было видно. */
+.homerule-search input[type="search"] {
+    flex: 1;
+    height: 1.6rem;
+    padding: 0 0.5rem;
+    background: rgba(0, 0, 0, 0.07);
+    border: 1px solid var(--color-form-border, #5d513e);
+    border-radius: 3px;
+    box-shadow: 0 0 4px #6b3a0f40 inset;
+    outline: none;
+    color: var(--color-grey1, #000);
+}
+
+.homerule-search input[type="search"]::placeholder {
+    color: var(--color-grey3, #737373);
+    opacity: 1;
+}
+
+.homerule-search input[type="search"]:focus {
+    outline: none;
+    border-color: var(--color-warm, #4a0404);
+    background: rgba(0, 0, 0, 0.04);
+}
+
+/* Крестик очистки ядро рисует светлым — на пергаменте его не видно. */
+.homerule-search input[type="search"]::-webkit-search-cancel-button {
+    background:
+        linear-gradient(45deg, transparent 0%, transparent 43%, var(--color-form-border, #5d513e) 45%, var(--color-form-border, #5d513e) 55%, transparent 57%, transparent 100%),
+        linear-gradient(135deg, transparent 0%, transparent 43%, var(--color-form-border, #5d513e) 45%, var(--color-form-border, #5d513e) 55%, transparent 57%, transparent 100%);
+    cursor: pointer;
+}
+
+.sheet-list .list-content > .homerule-search-hidden,
+.wfrp4e.sheet .homerule-search-hidden {
+    display: none !important;
+}
+
+/* Значок со свойством школы в заголовке группы. */
+.homerule-lore-header .homerule-lore-info {
+    flex: 0 0 auto;
+    font-size: 0.75rem;
+    font-weight: normal;
+    opacity: 0.55;
+    cursor: help;
+}
+
+.homerule-lore-header .homerule-lore-info:hover {
+    opacity: 1;
+}
+
+/* Текст свойства школы длинный: подсказку пошире и по левому краю. */
+#tooltip.homerule-lore-tooltip {
+    max-width: 420px;
+    text-align: left;
+}
+
+/* Кнопка ¶ «искать и в описании» у строки поиска. */
+.homerule-search .homerule-search-text {
+    flex: 0 0 auto;
+    padding: 0.1rem 0.3rem;
+    border: 1px solid transparent;
+    border-radius: 3px;
+    opacity: 0.55;
+}
+
+.homerule-search .homerule-search-text:hover {
+    opacity: 1;
+}
+
+.homerule-search .homerule-search-text.active {
+    opacity: 1;
+    border-color: var(--color-grey2);
+}
+
+/* Строка найдена не по названию, а в описании. */
+.sheet-list .list-row .homerule-search-hit {
+    margin-left: 0.35rem;
+    font-size: 0.7rem;
+    opacity: 0.6;
+    cursor: help;
+}
+
+/* На вкладке навыков система отводит спискам calc(100% - 30px) — 30px под нижнюю
+   кнопку продолжительных проверок. Строка поиска сверху отнимает ещё свою высоту,
+   иначе низ списков уходит под край. */
+.homerule-search[data-kind="skills"] {
+    box-sizing: border-box;
+    height: 2rem;
+    margin: 0.15rem 0 0.25rem;
+}
+
+.homerule-search[data-kind="skills"] ~ .skill-lists {
+    height: calc(100% - 30px - 2.4rem);
+}
+
+/* Справка из библиотеки: карточка в чате. Разметка системы (`wfrp4e chat-card`,
+   `test-title`, `chat-buttons`), свои только фрагменты и таблицы. */
+.wfrp4e.chat-card.homerule-library .homerule-library-hit {
+    margin: 0.25rem 0;
+    border-top: 1px solid var(--color-border-light-tertiary, rgba(0, 0, 0, 0.2));
+}
+
+.wfrp4e.chat-card.homerule-library .homerule-library-hit > summary {
+    cursor: pointer;
+    padding: 0.2rem 0;
+}
+
+.wfrp4e.chat-card.homerule-library .homerule-library-section,
+.wfrp4e.chat-card.homerule-library .homerule-library-source {
+    display: block;
+    font-size: var(--font-size-12, 12px);
+    opacity: 0.75;
+}
+
+.wfrp4e.chat-card.homerule-library .homerule-library-text {
+    max-height: 22rem;
+    overflow-y: auto;
+    font-size: var(--font-size-13, 13px);
+}
+
+.wfrp4e.chat-card.homerule-library .homerule-library-text p {
+    margin: 0.3rem 0;
+}
+
+.wfrp4e.chat-card.homerule-library .homerule-library-table {
+    width: 100%;
+    margin: 0.3rem 0;
+    border-collapse: collapse;
+    font-size: var(--font-size-12, 12px);
+}
+
+.wfrp4e.chat-card.homerule-library .homerule-library-table th,
+.wfrp4e.chat-card.homerule-library .homerule-library-table td {
+    padding: 0.1rem 0.25rem;
+    border: 1px solid var(--color-border-light-tertiary, rgba(0, 0, 0, 0.2));
+    text-align: left;
+    vertical-align: top;
+}
+
+/* MODULE-DEV.md §4: русские подписи в системную сетку кнопок не влезают. */
+.wfrp4e.chat-card.homerule-library .chat-buttons {
+    flex-wrap: wrap;
+    gap: 0.25rem;
+}
+
+.wfrp4e.chat-card.homerule-library .chat-buttons .chat-button {
+    flex: 1 1 auto;
+    min-width: max-content;
+    height: auto;
+    min-height: 1.5rem;
+    line-height: 1.3;
+    font-size: var(--font-size-12, 12px);
+    white-space: nowrap;
+}
+
+/* Разрубающее по черте «Броня»: своя кнопка рядом с системной «Применить Разрубающее». */
+.chat-message button.homerule-hack-trait {
+    margin-top: 0.25rem;
+    line-height: 1.3;
+    height: auto;
+    min-height: 1.6rem;
+    white-space: normal;
+}
+
+.chat-message a.homerule-hack-undo {
+    display: inline-block;
+    margin-top: 0.15rem;
+    font-size: var(--font-size-12, 12px);
+}
+
+.chat-message .homerule-hack-undone {
+    font-size: var(--font-size-12, 12px);
+    opacity: 0.7;
+}
+
+/* Черта «Броня» в блоке брони по зонам: класс щёлкается, как у доспехов. */
+.homerule-trait-armour .ap-value {
+    cursor: pointer;
+}
+
+.homerule-trait-armour .list-name .label {
+    font-style: italic;
+}
+
+/* Сводка по партии: окно ведущего, оформление ядра Foundry, цвета из его темы. */
+.homerule-party .homerule-party-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    margin-bottom: 0.4rem;
+}
+
+.homerule-party .homerule-party-toolbar button {
+    flex: 0 0 auto;
+    width: auto;
+}
+
+.homerule-party .homerule-party-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1.6fr) 1.2fr 0.9fr 0.9fr 1fr 2.2rem minmax(0, 1.6fr) 3rem;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.35rem 0.2rem;
+    border-bottom: 1px solid var(--color-border, rgba(0, 0, 0, 0.2));
+    font-size: var(--font-size-13, 13px);
+}
+
+.homerule-party .homerule-party-head {
+    font-size: var(--font-size-11, 11px);
+    color: var(--color-text-subtle, #888);
+}
+
+.homerule-party .homerule-party-name {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    min-width: 0;
+}
+
+.homerule-party .homerule-party-name img {
+    width: 28px;
+    height: 28px;
+    border: none;
+    border-radius: 50%;
+    object-fit: cover;
+    flex: 0 0 28px;
+}
+
+.homerule-party .homerule-party-name span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.homerule-party .homerule-party-bar {
+    height: 8px;
+    border: 1px solid var(--color-border, rgba(0, 0, 0, 0.2));
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.homerule-party .homerule-party-bar i {
+    display: block;
+    height: 100%;
+}
+
+.homerule-party .homerule-party-bar.ok i { background: var(--color-level-success, #3a7d44); }
+.homerule-party .homerule-party-bar.warning i { background: var(--color-level-warning, #c9a227); }
+.homerule-party .homerule-party-bar.danger i { background: var(--color-level-error, #b3261e); }
+.homerule-party .homerule-party-bar.corruption i { background: #7b4fa2; }
+
+.homerule-party .homerule-party-num,
+.homerule-party .homerule-party-muted {
+    font-size: var(--font-size-11, 11px);
+    color: var(--color-text-subtle, #888);
+}
+
+.homerule-party .homerule-party-pip {
+    display: inline-block;
+    width: 9px;
+    height: 9px;
+    margin-right: 2px;
+    border: 1px solid var(--color-text-secondary, #666);
+    border-radius: 50%;
+}
+
+.homerule-party .homerule-party-pip.filled {
+    background: var(--color-text-primary, #222);
+}
+
+.homerule-party .homerule-party-pip + .homerule-party-num {
+    margin-left: 0.2rem;
+}
+
+.homerule-party .homerule-party-adv {
+    text-align: center;
+    font-weight: bold;
+}
+
+.homerule-party .homerule-party-chip {
+    display: inline-block;
+    margin: 1px 3px 1px 0;
+    padding: 0 0.4rem;
+    border: 1px solid var(--color-level-warning, #c9a227);
+    border-radius: 3px;
+    font-size: var(--font-size-11, 11px);
+}
+
+.homerule-party .homerule-party-chip.danger {
+    border-color: var(--color-level-error, #b3261e);
+    color: var(--color-level-error, #b3261e);
+}
+
+.homerule-party .homerule-party-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.5rem;
+}
+
+.homerule-party .homerule-party-empty {
+    padding: 0.6rem 0.2rem;
+    color: var(--color-text-secondary, #666);
+}
+
+/* Рывок: строка под карточкой проверки и подсветка кнопки в меню токена. */
+.chat-message .homerule-sprint-note {
+    margin-top: 0.3rem;
+    padding: 0.2rem 0.4rem;
+    border-top: 1px solid var(--color-faded, #0003);
+    font-size: var(--font-size-12, 12px);
+}
+
+.chat-message .homerule-sprint-note i {
+    margin-right: 0.25rem;
+}
+
+#token-hud .control-icon.homerule-sprint.active {
+    border-color: var(--color-warm-2, #ff6400);
+    box-shadow: 0 0 6px var(--color-warm-2, #ff6400);
+}

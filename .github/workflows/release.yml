@@ -1,0 +1,66 @@
+# Выпуск версии: на GitHub нажали «Publish release» с меткой вида v1.14.0.
+# Сценарий прогоняет стенды, собирает module.zip, прикладывает к выпуску module.json
+# и module.zip и, если задан секрет FOUNDRY_RELEASE_TOKEN, регистрирует версию в
+# каталоге пакетов Foundry (https://foundryvtt.com/article/package-release-api/).
+name: Выпуск
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      FOUNDRY_RELEASE_TOKEN: ${{ secrets.FOUNDRY_RELEASE_TOKEN }}
+      TAG: ${{ github.event.release.tag_name }}
+      REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Стенды
+        run: |
+          node tests/stand.js
+          node tests/stand-sprint-palm.js
+
+      - name: module.json выпуска (версия из метки, ссылка на архив этой версии)
+        run: |
+          VERSION="${TAG#v}"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          jq --arg v "$VERSION" \
+             --arg d "https://github.com/$REPO/releases/download/$TAG/module.zip" \
+             '.version = $v | .download = $d' module.json > module.release.json
+          mv module.release.json module.json
+
+      - name: Архив
+        run: zip -r module.zip module.json README.md LICENSE CHANGELOG.md scripts styles
+
+      - name: Файлы к выпуску
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            module.json
+            module.zip
+
+      - name: Версия в каталоге Foundry
+        if: env.FOUNDRY_RELEASE_TOKEN != ''
+        run: |
+          BODY=$(jq -n \
+            --arg id "$(jq -r .id module.json)" \
+            --arg v "$VERSION" \
+            --arg m "https://github.com/$REPO/releases/download/$TAG/module.json" \
+            --arg n "https://github.com/$REPO/releases/tag/$TAG" \
+            --arg min "$(jq -r .compatibility.minimum module.json)" \
+            --arg ver "$(jq -r .compatibility.verified module.json)" \
+            '{id: $id, release: {version: $v, manifest: $m, notes: $n, compatibility: {minimum: $min, verified: $ver, maximum: ""}}}')
+          curl --fail-with-body -sS -X POST "https://foundryvtt.com/_api/packages/release_version/" \
+            -H "Content-Type: application/json" \
+            -H "Authorization: $FOUNDRY_RELEASE_TOKEN" \
+            -d "$BODY"
