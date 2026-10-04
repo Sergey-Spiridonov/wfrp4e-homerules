@@ -372,6 +372,7 @@ console.log(`\nпрошло ${passed} сценариев`);
 // Соседние секции модуля живы и настройки не перепутаны
 assert.deepStrictEqual(Object.keys(settingsDefs).sort(), ["armourTraitSheet", "critTraitDeflect", "guardChatMenu", "hackArmourTrait", "libraryLookup", "libraryUrl", "partyOverview", "sheetSearch", "slayerDeflect", "spellsByLore", "spellsByLoreCollapsed", "spellsByLoreOrder", "spellsByLoreOrderBase", "spellsByLoreSearchText", "sprintButton", "volansPalm"]);
 assert.strictEqual(settingsDefs.slayerDeflect.scope, "world");
+assert.strictEqual(settingsDefs.slayerDeflect.default, false, "отвод травмы убийцей чудовищ — домашнее правило, по умолчанию выключено");
 assert.strictEqual(settingsDefs.guardChatMenu.scope, "world");
 assert.strictEqual(settingsDefs.guardChatMenu.default, false, "заплатка меню — по умолчанию выключена: в 10.0.3 дефект починен");
 assert.strictEqual(settingsDefs.libraryLookup.default, false, "справка /правило — по желанию: без своей службы поиска бесполезна");
