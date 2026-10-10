@@ -370,7 +370,7 @@ test("настоящий набор Тэлиры: школа то строкой
 console.log(`\nпрошло ${passed} сценариев`);
 
 // Соседние секции модуля живы и настройки не перепутаны
-assert.deepStrictEqual(Object.keys(settingsDefs).sort(), ["armourTraitSheet", "critTraitDeflect", "guardChatMenu", "hackArmourTrait", "libraryLookup", "libraryUrl", "partyOverview", "sheetSearch", "slayerDeflect", "spellsByLore", "spellsByLoreCollapsed", "spellsByLoreOrder", "spellsByLoreOrderBase", "spellsByLoreSearchText", "sprintButton", "volansPalm"]);
+assert.deepStrictEqual(Object.keys(settingsDefs).sort(), ["armourTraitSheet", "critTraitDeflect", "guardChatMenu", "hackArmourTrait", "libraryLookup", "libraryUrl", "mountedVsMounted", "partyOverview", "sheetSearch", "slayerDeflect", "spellsByLore", "spellsByLoreCollapsed", "spellsByLoreOrder", "spellsByLoreOrderBase", "spellsByLoreSearchText", "sprintButton", "volansPalm"]);
 assert.strictEqual(settingsDefs.slayerDeflect.scope, "world");
 assert.strictEqual(settingsDefs.slayerDeflect.default, false, "отвод травмы убийцей чудовищ — домашнее правило, по умолчанию выключено");
 assert.strictEqual(settingsDefs.guardChatMenu.scope, "world");
@@ -2464,6 +2464,99 @@ await ftest("для макроса: api.openPartyOverview после ready", () 
     hooks.once.ready.forEach(f => f());
     assert.strictEqual(typeof mod.api.openPartyOverview, "function");
     assert.strictEqual(mod.api.other, 1, "чужое в api не затираем");
+});
+
+// ================= Всадник против всадника =================
+const MOUNT_LABEL = "CHAT.TestModifiers.AttackerMountLarger";
+class FakeAttackDialog {
+    constructor({ attacker, target, attackType = "melee", reach = 4 }) {
+        this.actor = attacker; this.item = { attackType, reachNum: reach }; this.data = { targets: [target] }; this.renders = 0;
+        this.fields = { modifier: 0 };
+        this.tooltips = { _modifier: { list: [] }, add(type, value, source) { if (value && source) this["_" + type].list.push({ value, source }); } };
+    }
+    render() { this.renders++; }
+    // как система: при атакующем верхом сравнивает его скакуна с самим всадником-целью
+    _computeTargets(target) {
+        if (this.actor.isMounted && this.item.attackType == "melee") {
+            if (this.actor.mount.sizeNum - target.actor.sizeNum >= 1) { this.fields.modifier += 20; this.tooltips.add("modifier", 20, MOUNT_LABEL); }
+        }
+        else if (this.item.attackType == "melee" && target.actor.isMounted) {
+            if (target.actor.mount.sizeNum - this.actor.sizeNum >= 1 && !(this.item.reachNum >= 5)) { this.fields.modifier -= 10; this.tooltips.add("modifier", -10, "DefenderMountLarger"); }
+        }
+    }
+}
+Object.defineProperty(FakeAttackDialog, "name", { value: "AttackDialog" });
+// как в системе: у оружия свой _computeTargets (super + дальность), у черт — нет
+class FakeWeaponDialog extends FakeAttackDialog { _computeTargets(target) { super._computeTargets(target); this.rangeDone = true; } }
+Object.defineProperty(FakeWeaponDialog, "name", { value: "WeaponDialog" });
+class FakeTraitDialog extends FakeAttackDialog {}
+Object.defineProperty(FakeTraitDialog, "name", { value: "TraitDialog" });
+const HORSE = { sizeNum: 4 }, GRIFFON = { sizeNum: 5 };
+const rider = mount => ({ sizeNum: 3, isMounted: !!mount, mount });
+function mounted(attackerMount, targetMount, opts = {}) {
+    const d = new FakeWeaponDialog({ attacker: rider(attackerMount), target: { actor: rider(targetMount) }, ...opts });
+    d._computeTargets(d.data.targets[0]);
+    return d;
+}
+
+await ftest("всадник против всадника: обёртка ставится при первом окне один раз, окно с двумя всадниками перерисовывается", () => {
+    settingsVals.mountedVsMounted = true;
+    const first = new FakeWeaponDialog({ attacker: rider(HORSE), target: { actor: rider(HORSE) } });
+    hooks.on.renderAttackDialog.forEach(f => f(first));
+    assert.strictEqual(first.renders, 1, "первое окно посчитано без правила — перерисовать");
+    assert(FakeAttackDialog.prototype._computeTargets.homeruleMounted);
+    const wrapped = FakeAttackDialog.prototype._computeTargets;
+    const second = new FakeWeaponDialog({ attacker: rider(HORSE), target: { actor: rider(HORSE) } });
+    hooks.on.renderAttackDialog.forEach(f => f(second));
+    assert.strictEqual(FakeAttackDialog.prototype._computeTargets, wrapped, "второй раз не оборачиваем");
+    assert.strictEqual(second.renders, 0);
+    assert(!FakeWeaponDialog.prototype._computeTargets.homeruleMounted, "оборачиваем класс AttackDialog, не наследника");
+    const trait = new FakeTraitDialog({ attacker: rider(GRIFFON), target: { actor: rider(HORSE) } });
+    hooks.on.renderAttackDialog.forEach(f => f(trait));
+    trait._computeTargets(trait.data.targets[0]);
+    assert.strictEqual(trait.fields.modifier, 20, "черта — то же правило");
+    const weapon = mounted(GRIFFON, HORSE);
+    assert.strictEqual(weapon.fields.modifier, 20, "оружие — правило один раз");
+    assert(weapon.rangeDone);
+});
+
+await ftest("всадник против всадника: равные кони — без модификатора и без строки системы; грифон против коня +20, конь против грифона −10", () => {
+    settingsVals.mountedVsMounted = true;
+    const eq = mounted(HORSE, HORSE);
+    assert.strictEqual(eq.fields.modifier, 0);
+    assert.deepStrictEqual(eq.tooltips._modifier.list, []);
+    const big = mounted(GRIFFON, HORSE);
+    assert.strictEqual(big.fields.modifier, 20);
+    assert.deepStrictEqual(big.tooltips._modifier.list.map(e => e.value), [20]);
+    assert(big.tooltips._modifier.list[0].source.includes("всадник против всадника"));
+    const small = mounted(HORSE, GRIFFON);
+    assert.strictEqual(small.fields.modifier, -10);
+    assert.deepStrictEqual(small.tooltips._modifier.list.map(e => e.value), [-10]);
+    const lance = mounted(HORSE, GRIFFON, { reach: 5 });
+    assert.strictEqual(lance.fields.modifier, 0, "длинное оружие — без штрафа");
+    const pony = mounted({ sizeNum: 3 }, HORSE);
+    assert.strictEqual(pony.fields.modifier, -10, "на пони (+20 система не дала) против коня");
+});
+
+await ftest("всадник против всадника: пеший, стрельба, неизвестный скакун и выключенное правило — как у системы", () => {
+    settingsVals.mountedVsMounted = true;
+    assert.strictEqual(mounted(HORSE, null).fields.modifier, 20, "всадник против пешего");
+    assert.strictEqual(mounted(null, HORSE).fields.modifier, -10, "пеший против всадника");
+    assert.strictEqual(mounted(HORSE, HORSE, { attackType: "ranged" }).fields.modifier, 0);
+    const off_horse = new FakeWeaponDialog({ attacker: rider(HORSE), target: { actor: { sizeNum: 3, isMounted: false, mount: HORSE } } });
+    off_horse._computeTargets(off_horse.data.targets[0]);
+    assert.strictEqual(off_horse.fields.modifier, 20, "цель спешилась, скакун в данных остался — она пешая");
+    const lost = mounted(HORSE, {});
+    assert.strictEqual(lost.fields.modifier, 20, "скакун цели не найден — не трогаем");
+    settingsVals.mountedVsMounted = false;
+    const off = mounted(HORSE, HORSE);
+    assert.strictEqual(off.fields.modifier, 20);
+    const offDialog = new FakeWeaponDialog({ attacker: rider(HORSE), target: { actor: rider(HORSE) } });
+    hooks.on.renderAttackDialog.forEach(f => f(offDialog));
+    assert.strictEqual(offDialog.renders, 0);
+    settingsVals.mountedVsMounted = true;
+    assert.strictEqual(settingsDefs.mountedVsMounted.scope, "world");
+    assert.strictEqual(settingsDefs.mountedVsMounted.default, true);
 });
 
 console.log(`прошло ${fpassed} сценариев папок, поиска, справки, черты «Броня» и сводки по партии`);

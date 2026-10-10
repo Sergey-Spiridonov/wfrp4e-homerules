@@ -32,6 +32,9 @@
  *
  * Предмет 9. Девятнадцатая длань Воланса: развеивание без языка (магического) —
  * силой воли.
+ *
+ * Правило 10 (толкование стола). Всадник против всадника: модификаторы боя верхом
+ * по размерам скакунов, а не всадника-цели (в конце файла).
  */
 
 const MODULE = "wfrp4e-homerules";
@@ -50,6 +53,7 @@ const TRAIT_SHEET_SETTING = "armourTraitSheet";
 const CRIT_TRAIT_SETTING = "critTraitDeflect";
 const SPRINT_SETTING = "sprintButton";
 const PALM_SETTING = "volansPalm";
+const MOUNTED_SETTING = "mountedVsMounted";
 const SOCKET = "module.wfrp4e-homerules";
 
 const LORE_ORDERS = {
@@ -128,6 +132,15 @@ Hooks.once("init", () =>
     game.settings.register(MODULE, SPRINT_SETTING, {
         name: "Рывок: кнопка в меню токена",
         hint: "В меню токена (правый щелчок) появляется кнопка «Рывок»: проверка атлетики (+20), после которой линейка перемещения до конца раунда разрешает ещё бег + уровень успеха ярдов (Книга правил, «Рывок»).",
+        scope: "world",
+        config: true,
+        type: Boolean,
+        default: true
+    });
+
+    game.settings.register(MODULE, MOUNTED_SETTING, {
+        name: "Всадник против всадника",
+        hint: "Толкование стола. Когда в рукопашной оба верхом, +20 и −10 боя верхом считаются по размерам скакунов: скакун атакующего крупнее — +20, мельче — −10 (с оружием длиной от «длинного» без штрафа), равны — без модификатора. Система даёт обоим всадникам +20.",
         scope: "world",
         config: true,
         type: Boolean,
@@ -3610,3 +3623,118 @@ Hooks.once("ready", () =>
         module.api = { ...(module.api ?? {}), startSprint };
     }
 });
+
+/**
+ * Правило 10 (толкование стола). Всадник против всадника.
+ *
+ * Книга («Сражение верхом»): всадник получает +20 к попаданию, если цель меньше
+ * его скакуна; бьющий по всаднику получает −10, если сам меньше скакуна врага.
+ * Это преимущество высоты седла над землёй; когда оба в седле, за столом (и в
+ * чате знатоков) их сравнивают по скакунам: крупнее скакун атакующего — +20,
+ * крупнее скакун цели — −10, равны — ничего.
+ *
+ * Система (`attack-dialog.js`, `_computeTargets`) в ветке «оба верхом» сравнивает
+ * скакуна атакующего с самим всадником-целью — у авторов там «TODO this seems
+ * wrong», — и два всадника на конях получают +20 оба, а −10 при атакующем верхом
+ * не проверяется вовсе. Обёртка после расчёта системы снимает её +20 (вместе со
+ * строкой подсказки) и ставит модификатор по скакунам; исключение для −10 —
+ * оружие длиной от «длинного», как у системы в ветке «пеший против всадника».
+ *
+ * Класс окна система наружу не отдаёт: берём его из цепочки наследования при
+ * первой отрисовке (`renderAttackDialog` зовётся и для оружия, и для черт) и
+ * перерисовываем это окно — поля пересчитываются при каждой отрисовке.
+ */
+Hooks.on("renderAttackDialog", app =>
+{
+    try
+    {
+        if (wrapAttackDialog(app) && mountedVsMountedApplies(app, app.data?.targets?.[0]))
+        {
+            app.render();
+        }
+    }
+    catch (e)
+    {
+        console.error(MODULE + " | не удалось подключить правило «Всадник против всадника»:", e);
+    }
+});
+
+/** Обернуть `_computeTargets` у класса `AttackDialog`; `true`, если обёрнуто сейчас. */
+function wrapAttackDialog(app)
+{
+    let proto = Object.getPrototypeOf(app ?? {});
+    while (proto && proto.constructor?.name !== "AttackDialog")
+    {
+        proto = Object.getPrototypeOf(proto);
+    }
+    const original = proto?._computeTargets;
+    if (typeof original !== "function" || original.homeruleMounted)
+    {
+        return false;
+    }
+    const wrapped = function (target)
+    {
+        const result = original.call(this, target);
+        try
+        {
+            applyMountedVsMounted(this, target);
+        }
+        catch (e)
+        {
+            console.error(MODULE + " | правило «Всадник против всадника» не сработало:", e);
+        }
+        return result;
+    };
+    wrapped.homeruleMounted = true;
+    proto._computeTargets = wrapped;
+    return true;
+}
+
+/** Рукопашная, оба верхом, скакуны известны и правило включено. */
+function mountedVsMountedApplies(dialog, target)
+{
+    if (!game.settings.get(MODULE, MOUNTED_SETTING) || dialog?.item?.attackType !== "melee")
+    {
+        return false;
+    }
+    const actor = dialog.actor;
+    const other = target?.actor;
+    return Boolean(actor?.isMounted && other?.isMounted
+        && Number.isFinite(actor.mount?.sizeNum) && Number.isFinite(other.mount?.sizeNum));
+}
+
+function applyMountedVsMounted(dialog, target)
+{
+    if (!mountedVsMountedApplies(dialog, target))
+    {
+        return;
+    }
+    const actor = dialog.actor;
+    const other = target.actor;
+    const mine = actor.mount.sizeNum;
+    const theirs = other.mount.sizeNum;
+    const tips = dialog.tooltips?._modifier?.list;
+
+    // +20 системы: скакун атакующего крупнее самого всадника-цели
+    if (mine - other.sizeNum >= 1)
+    {
+        dialog.fields.modifier -= 20;
+        const label = game.i18n.localize("CHAT.TestModifiers.AttackerMountLarger");
+        const at = Array.isArray(tips) ? tips.findLastIndex(entry => entry.value === 20 && entry.source === label) : -1;
+        if (at >= 0)
+        {
+            tips.splice(at, 1);
+        }
+    }
+
+    if (mine > theirs)
+    {
+        dialog.fields.modifier += 20;
+        dialog.tooltips.add("modifier", 20, "Скакун крупнее скакуна противника (всадник против всадника)");
+    }
+    else if (mine < theirs && !((Number(dialog.item.reachNum) || 0) >= 5))
+    {
+        dialog.fields.modifier -= 10;
+        dialog.tooltips.add("modifier", -10, "Скакун противника крупнее (всадник против всадника)");
+    }
+}
