@@ -2072,6 +2072,149 @@ await ftest("«Отменить» под карточкой отвода: пун
     assert.strictEqual(card.flags["wfrp4e-homerules"].hack.kind, "crit");
 });
 
+// ---------- урон по графе травмы: травма уже брошена, уже на листе, ещё не брошена ----------
+function woundKit(opts = {}) {
+    const k = critKit(opts);
+    k.defender.uuid = "Actor.C1"; k.defender.woundCalls = [];
+    k.defender.modifyWounds = async n => { k.defender.woundCalls.push(n); };
+    k.defender.items = { contents: [] };
+    return k;
+}
+function postedCrit(source = "T1", wounds = "3", name = "Рассечённый лоб") {
+    return { id: "P1", type: "item", flags: {}, system: { itemData: { name, type: "critical", system: { wounds: { value: wounds } }, flags: { wfrp4e: { sourceMessageId: source } } } } };
+}
+const rerendered = [];
+ctx.ui.chat = { updateMessage: m => rerendered.push(m.id) };
+const deflectCard = () => created.find(c => c.flags?.["wfrp4e-homerules"]?.hack?.kind === "crit");
+
+await ftest("травму уже бросили: снимаются выпавшие пункты, карточка травмы перерисовывается, в карточке отвода — сколько", async () => {
+    hreset(); rerendered.length = 0;
+    const k = woundKit();
+    ctx.game.messages.contents = [k.message, postedCrit()];
+    renderMsg(k.message, k.root);
+    critLinks(k.root)[0].click(); await flush(); await flush();
+    assert.deepStrictEqual(k.defender.woundCalls, [-3]);
+    const card = deflectCard();
+    assert(card.content.includes("По выпавшей травме «Рассечённый лоб» снято пунктов здоровья: <strong>3</strong>. Травма на лист не кладётся."), card.content);
+    assert.strictEqual(card.flags["wfrp4e-homerules"].hack.wounds, 3);
+    assert.deepStrictEqual(rerendered, ["P1"]);
+});
+
+await ftest("травма уже брошена, урона по графе нет или «смерть» — пункты не трогаем, пишем, что там", async () => {
+    hreset();
+    const k = woundKit();
+    ctx.game.messages.contents = [k.message, postedCrit("T1", "death")];
+    renderMsg(k.message, k.root);
+    critLinks(k.root)[0].click(); await flush(); await flush();
+    assert.deepStrictEqual(k.defender.woundCalls, []);
+    assert(deflectCard().content.includes("урона нет (там «death»)"));
+    assert.strictEqual(deflectCard().flags["wfrp4e-homerules"].hack.wounds, undefined);
+});
+
+await ftest("чужая травма в чате (другая атака) — не наша; берётся последняя по этой атаке", async () => {
+    hreset();
+    const k = woundKit();
+    ctx.game.messages.contents = [k.message, postedCrit("T1", "1", "Старая"), postedCrit("T1", "4", "Новая"), postedCrit("T9", "9", "Чужая")];
+    renderMsg(k.message, k.root);
+    critLinks(k.root)[0].click(); await flush(); await flush();
+    assert.deepStrictEqual(k.defender.woundCalls, [-4]);
+    assert(deflectCard().content.includes("«Новая»"));
+});
+
+await ftest("травму уже перенесли на лист: убираем с листа, пункты не трогаем (система сняла их при переносе)", async () => {
+    hreset();
+    const k = woundKit();
+    let deleted = 0;
+    const injury = { name: "Рассечённый лоб", type: "critical", system: { wounds: { value: "3" } }, flags: { wfrp4e: { sourceMessageId: "T1" } },
+        getFlag(s, key) { return this.flags?.[s]?.[key]; }, async delete() { deleted++; } };
+    const other = { name: "Старая рана", type: "critical", system: { wounds: { value: "1" } }, flags: { wfrp4e: { sourceMessageId: "T0" } },
+        getFlag(s, key) { return this.flags?.[s]?.[key]; }, async delete() { throw new Error("не та травма"); } };
+    k.defender.items.contents = [other, injury];
+    ctx.game.messages.contents = [k.message, postedCrit()];
+    renderMsg(k.message, k.root);
+    critLinks(k.root)[0].click(); await flush(); await flush();
+    assert.strictEqual(deleted, 1);
+    assert.deepStrictEqual(k.defender.woundCalls, []);
+    const card = deflectCard();
+    assert(card.content.includes("Травма «Рассечённый лоб» снята с листа; урон по её графе (3) уже засчитан."), card.content);
+    assert.strictEqual(card.flags["wfrp4e-homerules"].hack.removed, "Рассечённый лоб");
+});
+
+await ftest("травму ещё не бросали: ведущий бросает сам и берёт только пункты; не ведущему — подсказка", async () => {
+    hreset();
+    const rolls = [];
+    ctx.game.wfrp4e.tables = { generalizeTable: t => t.replace(/^crit[lr]/, "crit"), rollTable: async (key, o) => { rolls.push([key, o.modifier]); return { roll: 57, object: { documentUuid: "Item.X" } }; } };
+    ctx.fromUuid = async uuid => uuid === "Item.X" ? { name: "Сломанный нос", system: { wounds: { value: "2" } } } : null;
+    const k = woundKit(); k.crit.dataset.modifier = "10";
+    renderMsg(k.message, k.root);
+    critLinks(k.root)[0].click(); await flush(); await flush(); await flush();
+    assert.deepStrictEqual(rolls, [["crithead", 10]]);
+    assert.deepStrictEqual(k.defender.woundCalls, [-2]);
+    assert(deflectCard().content.includes("По таблице травм (бросок 57): «Сломанный нос». Снято пунктов здоровья: <strong>2</strong>."));
+    assert.strictEqual(deflectCard().flags["wfrp4e-homerules"].hack.wounds, 2);
+
+    hreset(); rolls.length = 0; ctx.game.user.isGM = false;
+    try {
+        const p = woundKit(); renderMsg(p.message, p.root);
+        critLinks(p.root)[0].click(); await flush(); await flush();
+        assert.deepStrictEqual(rolls, []);
+        assert.deepStrictEqual(p.defender.woundCalls, []);
+        assert(deflectCard().content.includes("Бросок по таблице травм — за ведущим"));
+    } finally { ctx.game.user.isGM = true; delete ctx.game.wfrp4e.tables; delete ctx.fromUuid; }
+});
+
+await ftest("карточка травмы по отведённой атаке — зачёркнута с пометкой; без отвода, после отмены и не травма — как есть", () => {
+    hreset();
+    const draw = msg => { const root = el("div"); const content = el("div", ["message-content"]); content.append(el("div", ["post-item"])); root.append(content); renderMsg(msg, root); return root; };
+    ctx.game.messages.contents = [{ flags: { "wfrp4e-homerules": { hack: { kind: "crit", sourceMessage: "T1", traitUuid: "Actor.C1.Item.T1", loc: "head" } } } }];
+    const a = draw(postedCrit());
+    assert(a.querySelector(".post-item").classList.contains("nulled"));
+    assert.strictEqual(a.querySelectorAll("p.homerule-crit-deflected").length, 1);
+    const b = draw(postedCrit("T2"));
+    assert(!b.querySelector(".post-item").classList.contains("nulled"));
+    ctx.game.messages.contents[0].flags["wfrp4e-homerules"].hack.undone = true;
+    const c = draw(postedCrit());
+    assert(!c.querySelector(".post-item").classList.contains("nulled"), "отменённый отвод — травму можно класть");
+    ctx.game.messages.contents[0].flags["wfrp4e-homerules"].hack.undone = false;
+    const sword = postedCrit(); sword.system.itemData.type = "weapon";
+    assert(!draw(sword).querySelector(".post-item").classList.contains("nulled"));
+});
+
+await ftest("на лист отведённую травму не кладём: тому же существу — нет, другому и после отмены — можно", () => {
+    hreset();
+    const k = woundKit();
+    ctx.game.messages.contents = [{ flags: { "wfrp4e-homerules": { hack: { kind: "crit", sourceMessage: "T1", traitUuid: k.trait.uuid, loc: "head" } } } }];
+    const item = parent => ({ type: "critical", parent, flags: { wfrp4e: { sourceMessageId: "T1" } }, getFlag(s, key) { return this.flags?.[s]?.[key]; } });
+    const pre = it => hooks.on.preCreateItem.map(f => f(it, {}, {}, "GM1"));
+    assert(pre(item(k.defender)).includes(false));
+    assert(notes.some(n => n.includes("отведена чертой «Броня»")));
+    assert(!pre(item({ uuid: "Actor.X" })).includes(false), "другое существо");
+    const plain = item(k.defender); plain.flags = {};
+    assert(!pre(plain).includes(false), "травма не от этой атаки");
+    ctx.game.messages.contents[0].flags["wfrp4e-homerules"].hack.undone = true;
+    assert(!pre(item(k.defender)).includes(false), "отвод отменён");
+    settingsVals.critTraitDeflect = false; ctx.game.messages.contents[0].flags["wfrp4e-homerules"].hack.undone = false;
+    assert(!pre(item(k.defender)).includes(false), "правило выключено");
+    settingsVals.critTraitDeflect = true;
+});
+
+await ftest("«Отменить» у отвода с уроном травмы — пункты возвращаются; у снятой с листа — подсказка вернуть из чата", async () => {
+    hreset();
+    const k = woundKit({ damage: { head: 1 } });
+    const mk = hack => ({ id: "C7", isOwner: true, flags: { "wfrp4e-homerules": { hack } }, async setFlag(scope, key, val) { this.flags[scope][key] = structuredClone(val); } });
+    const card = mk({ kind: "crit", sourceMessage: "T1", traitUuid: k.trait.uuid, loc: "head", wounds: 3 });
+    const root = el("div"); root.append(el("div", ["message-content"])); renderMsg(card, root);
+    root.querySelectorAll("a.homerule-hack-undo")[0].click(); await flush(); await flush();
+    assert.deepStrictEqual(k.defender.woundCalls, [3]);
+    assert.strictEqual(card.flags["wfrp4e-homerules"].hack.undone, true);
+    k.trait.flags.wfrp4e.APdamage.head = 1;
+    const card2 = mk({ kind: "crit", sourceMessage: "T1", traitUuid: k.trait.uuid, loc: "head", removed: "Рассечённый лоб" });
+    const root2 = el("div"); root2.append(el("div", ["message-content"])); renderMsg(card2, root2);
+    root2.querySelectorAll("a.homerule-hack-undo")[0].click(); await flush(); await flush();
+    assert.deepStrictEqual(k.defender.woundCalls, [3], "пункты не трогаем — их снимет возврат травмы на лист");
+    assert(notes.some(n => n.includes("верни её перетаскиванием из чата")));
+});
+
 // ---------- строка черты на листе ----------
 const LOC_LABELS = { head: "Голова", body: "Корпус", lArm: "Левая рука", rArm: "Правая рука", lLeg: "Левая нога", rLeg: "Правая нога" };
 function sheetKit({ damage = {}, spec = "2", labels = LOC_LABELS } = {}) {

@@ -464,32 +464,12 @@ async function onSocket(payload)
 
 async function rollDeflectedInjury(actor, { table, modifier = 0, column = null })
 {
-    const tables = game.wfrp4e?.tables;
-    if (!tables?.rollTable)
+    const rolled = await rollInjuryWounds({ table, modifier, column });
+    if (!rolled)
     {
         return;
     }
-
-    // Ключ из ссылки собран как crit + зона попадания (critlLeg, critrArm…), а таблицы
-    // в мире общие на обе руки и обе ноги. Приведение делает сама система, но в
-    // `formatChatRoll`, а не в `rollTable`, — зовём отдельно, иначе «Таблица critlLeg не найдена».
-    const key = tables.generalizeTable ? tables.generalizeTable(table) : table.toLowerCase();
-
-    let result;
-    try
-    {
-        result = await tables.rollTable(key, { modifier }, column);
-    }
-    catch (e)
-    {
-        console.error(MODULE + " | бросок по таблице травм не прошёл:", e);
-        return ui.notifications.error("Бросок по таблице травм не прошёл — сделай его вручную.");
-    }
-
-    const item = result?.object?.documentUuid ? await fromUuid(result.object.documentUuid) : null;
-    const name = item?.name || result?.text || result?.name || "—";
-    const raw = item?.system?.wounds?.value;
-    const wounds = Number.parseInt(raw);
+    const { name, raw, wounds } = rolled;
 
     let line;
     if (Number.isInteger(wounds) && wounds > 0)
@@ -506,8 +486,47 @@ async function rollDeflectedInjury(actor, { table, modifier = 0, column = null }
     await ChatMessage.create({
         speaker: ChatMessage.getSpeaker({ actor }),
         flavor: "Убийца чудовищ — домашнее правило",
-        content: "<p>По таблице травм (бросок " + (result?.roll ?? "?") + "): <strong>" + name + "</strong>.</p><p>" + line + "</p>"
+        content: "<p>По таблице травм (бросок " + rolled.roll + "): <strong>" + name + "</strong>.</p><p>" + line + "</p>"
     });
+}
+
+/**
+ * Бросок по таблице травм: что выпало и сколько пунктов здоровья по графе «Урон».
+ * Ничего не меняет; `null`, если бросить не вышло (ошибку уже показали).
+ */
+async function rollInjuryWounds({ table, modifier = 0, column = null })
+{
+    const tables = game.wfrp4e?.tables;
+    if (!tables?.rollTable || !table)
+    {
+        return null;
+    }
+
+    // Ключ из ссылки собран как crit + зона попадания (critlLeg, critrArm…), а таблицы
+    // в мире общие на обе руки и обе ноги. Приведение делает сама система, но в
+    // `formatChatRoll`, а не в `rollTable`, — зовём отдельно, иначе «Таблица critlLeg не найдена».
+    const key = tables.generalizeTable ? tables.generalizeTable(table) : table.toLowerCase();
+
+    let result;
+    try
+    {
+        result = await tables.rollTable(key, { modifier }, column);
+    }
+    catch (e)
+    {
+        console.error(MODULE + " | бросок по таблице травм не прошёл:", e);
+        ui.notifications.error("Бросок по таблице травм не прошёл — сделай его вручную.");
+        return null;
+    }
+
+    const item = result?.object?.documentUuid ? await fromUuid(result.object.documentUuid) : null;
+    const raw = item?.system?.wounds?.value;
+    return {
+        name: item?.name || result?.text || result?.name || "—",
+        raw,
+        wounds: Number.parseInt(raw),
+        roll: result?.roll ?? "?"
+    };
 }
 
 async function confirmDeflect(actor)
@@ -2467,6 +2486,14 @@ function addHackUndo(message, root, card)
         event.preventDefault();
         event.stopPropagation();
         await stepArmourTraitDamage(trait, card.loc, -1);
+        if (card.kind === "crit" && card.wounds > 0)
+        {
+            await trait.parent.modifyWounds?.(card.wounds); // пункты, снятые по графе травмы
+        }
+        if (card.kind === "crit" && card.removed)
+        {
+            ui.notifications.info("Травма «" + card.removed + "» была снята с листа — верни её перетаскиванием из чата.");
+        }
         await message.setFlag(MODULE, "hack", { ...card, undone: true });
     });
     (root.querySelector(".message-content") ?? root).append(link);
@@ -2504,6 +2531,20 @@ function onRenderCritDeflect(message, element)
             return; // хук зовётся под двумя именами — привязываемся один раз
         }
         root.dataset.homeruleCritTrait = "1";
+        const posted = message.type === "item" ? message.system?.itemData : null;
+        if (posted?.type === "critical")
+        {
+            const source = posted.flags?.wfrp4e?.sourceMessageId;
+            if (source && hackAppliedFrom(source, "crit").length)
+            {
+                root.querySelector(".post-item")?.classList.add("nulled");
+                const note = document.createElement("p");
+                note.classList.add("homerule-crit-deflected");
+                note.textContent = "Травма отведена чертой «Броня»: на лист не кладётся, урон по её графе засчитан.";
+                (root.querySelector(".message-content") ?? root).append(note);
+            }
+            return;
+        }
         const critLink = root.querySelector("a.critical-roll");
         if (!critLink || message.flags?.[MODULE]?.hack)
         {
@@ -2586,16 +2627,158 @@ async function applyCritTraitDeflect(message, trait, loc, link, critLink)
     link.classList.add("nulled");
     critLink?.classList.add("nulled");
 
+    const injury = await settleDeflectedInjury(actor, message, critLink);
+    const card = { kind: "crit", sourceMessage: message.id, traitUuid: trait.uuid, loc };
+    if (injury.wounds)
+    {
+        card.wounds = injury.wounds;
+    }
+    if (injury.removed)
+    {
+        card.removed = injury.removed;
+    }
+
     const esc = foundry.utils.escapeHTML;
-    return ChatMessage.create({
+    const created = await ChatMessage.create({
         speaker: ChatMessage.getSpeaker({ actor }),
         content: "<p><strong>Травма отведена</strong>: черта «" + esc(trait.name) + "» у " + esc(actor.name)
             + ", " + esc(locationLabel(loc).toLowerCase()) + " — класс брони −1, осталось "
             + (step.max - step.after) + ".</p>"
-            + "<p>Урон засчитывается полностью, дополнительные эффекты травмы не наступают.</p>",
-        flags: { [MODULE]: { hack: { kind: "crit", sourceMessage: message.id, traitUuid: trait.uuid, loc } } }
+            + "<p>Урон засчитывается полностью, дополнительные эффекты травмы не наступают.</p>"
+            + (injury.line ? "<p>" + injury.line + "</p>" : ""),
+        flags: { [MODULE]: { hack: card } }
     });
+    // карточка уже выброшенной травмы перерисуется зачёркнутой (см. onRenderCritDeflect)
+    if (injury.postedMessage)
+    {
+        ui.chat?.updateMessage?.(injury.postedMessage);
+    }
+    return created;
 }
+
+/**
+ * Урон по графе «Урон» самой травмы при отводе чертой.
+ *
+ * По книге отводится травма, а «весь причитающийся урон» существо получает. У
+ * результата таблицы травм своя графа «Урон» — её пункты засчитываются, как в
+ * правиле 1 (`rollDeflectedInjury`). Порядок за столом бывает любой:
+ * - травму уже перенесли на лист — система при этом сама сняла её пункты
+ *   (`CriticalModel._onCreate`); травму убираем с листа, пункты не трогаем;
+ * - травму уже бросили, она лежит в чате (сообщение-предмет со ссылкой на атаку
+ *   во флаге `wfrp4e.sourceMessageId` — так её выкладывает `formatChatRoll`) —
+ *   снимаем выпавшие пункты, класть её на лист больше нельзя (`preCreateItem`);
+ * - травму ещё не бросали — бросает ведущий, берём только пункты.
+ * Возвращает строку для карточки и что сделано — для «Отменить».
+ */
+async function settleDeflectedInjury(actor, message, critLink)
+{
+    const esc = foundry.utils.escapeHTML;
+    const applied = appliedCritOn(actor, message.id);
+    if (applied)
+    {
+        const raw = applied.system?.wounds?.value;
+        await applied.delete();
+        return {
+            removed: applied.name,
+            line: "Травма «" + esc(applied.name) + "» снята с листа; урон по её графе"
+                + (raw ? " (" + esc(String(raw)) + ")" : "") + " уже засчитан."
+        };
+    }
+
+    const posted = rolledCritFor(message.id);
+    if (posted)
+    {
+        const data = posted.system.itemData;
+        const raw = data.system?.wounds?.value;
+        const wounds = Number.parseInt(raw);
+        const name = esc(data.name || "—");
+        if (Number.isInteger(wounds) && wounds > 0)
+        {
+            await actor.modifyWounds(-wounds);
+            return { wounds, postedMessage: posted,
+                line: "По выпавшей травме «" + name + "» снято пунктов здоровья: <strong>" + wounds + "</strong>. Травма на лист не кладётся." };
+        }
+        return { postedMessage: posted,
+            line: "По выпавшей травме «" + name + "» урона нет" + (raw ? " (там «" + esc(String(raw)) + "»)" : "") + ". Травма на лист не кладётся." };
+    }
+
+    if (!critLink?.dataset.table)
+    {
+        return {};
+    }
+    if (!game.user.isGM)
+    {
+        return { line: "Бросок по таблице травм — за ведущим: урон по графе травмы он снимет сам." };
+    }
+    const rolled = await rollInjuryWounds({ table: critLink.dataset.table,
+        modifier: parseInt(critLink.dataset.modifier) || 0, column: critLink.dataset.column || null });
+    if (!rolled)
+    {
+        return {};
+    }
+    const name = esc(rolled.name);
+    if (Number.isInteger(rolled.wounds) && rolled.wounds > 0)
+    {
+        await actor.modifyWounds(-rolled.wounds);
+        return { wounds: rolled.wounds,
+            line: "По таблице травм (бросок " + rolled.roll + "): «" + name + "». Снято пунктов здоровья: <strong>" + rolled.wounds + "</strong>. Травма на лист не кладётся." };
+    }
+    return { line: "По таблице травм (бросок " + rolled.roll + "): «" + name + "». Урона по графе травмы нет"
+        + (rolled.raw ? " (там «" + esc(String(rolled.raw)) + "»)" : "") + ". Травма на лист не кладётся." };
+}
+
+/** Травма, выброшенная по этой атаке: последнее сообщение-предмет со ссылкой на неё. */
+function rolledCritFor(messageId)
+{
+    const recent = game.messages?.contents?.slice(-60) ?? [];
+    for (let i = recent.length - 1; i >= 0; i--)
+    {
+        const data = recent[i]?.system?.itemData;
+        if (recent[i].type === "item" && data?.type === "critical" && data.flags?.wfrp4e?.sourceMessageId === messageId)
+        {
+            return recent[i];
+        }
+    }
+    return null;
+}
+
+/** Та же травма, уже перенесённая на лист существа. */
+function appliedCritOn(actor, messageId)
+{
+    const items = actor?.items?.contents ?? Array.from(actor?.items ?? []);
+    return items.find(item => item.type === "critical" && item.getFlag?.("wfrp4e", "sourceMessageId") === messageId) ?? null;
+}
+
+/** Атака, травму по которой это существо отвело чертой (неотменённая карточка). */
+function critDeflectedFor(messageId, actor)
+{
+    return hackAppliedFrom(messageId, "crit").find(card => fromUuidSync(card.traitUuid)?.parent?.uuid === actor?.uuid) ?? null;
+}
+
+/** Отведённую травму на лист не кладём: ни перетаскиванием из чата, ни иначе. */
+Hooks.on("preCreateItem", (item, data, options, userId) =>
+{
+    try
+    {
+        if (!game.settings.get(MODULE, CRIT_TRAIT_SETTING) || item.type !== "critical" || !item.parent)
+        {
+            return;
+        }
+        const source = item.getFlag?.("wfrp4e", "sourceMessageId");
+        if (source && critDeflectedFor(source, item.parent))
+        {
+            if (userId === game.user.id)
+            {
+                ui.notifications.warn("Эта травма отведена чертой «Броня» — на лист не кладётся.");
+            }
+            return false;
+        }
+    }
+    catch (e)
+    {
+        console.error(MODULE + " | проверка отведённой травмы не прошла:", e);
+    }
+});
 
 /**
  * Заплатка: порча и починка черты «Броня» с листа.
